@@ -7,13 +7,52 @@ library_load <- function(){
   library(parallel);library(doParallel);library(progress);library(glue)
 }
 
-# association test
-assoc_test <- function(){
-  system("D://tool/plink.exe --file NeuroX/NeuroX_row --logistic beta --out NeuroX/NeuroX_dosage_logit", show.output.on.console = F)
+data_path <- "C:/Users/JINOO/Desktop/Parkinson_prediction/data/NeuroX_QC/NeuroX_recode"
+tool_path <- "D://tool/plink.exe"
+# association test & freq test
+assoc_test_fisher <- function(){
+  system(glue("{plink} --file {data} --assoc fisher --adjust --out NeuroX_fisher_adjust", 
+              data = data_path, plink = tool_path))
 }
 
-# min max scale
-min_max_scale <- function(x){(x-min(x, na.rm = T))/(max(x, na.rm = T)-min(x, na.rm = T))}
+logistic_test <- function(){
+  system(glue("{plink} --file {data} --logistic --adjust --out NeuroX_logit_adjust", 
+              data = data_path, plink = tool_path))
+}
+
+allele_freq <- function(){
+  system(glue("{plink} --file {data} --freq --out NeuroX_freq", data = data_path, plink = tool_path))
+}
+load_freq_maf <- function(type ){
+  path <- "C://Users/JINOO/Desktop/Parkinson_prediction/data/NeuroX_QC/"
+  
+  if(type == "fisher")
+  {
+    NeuroX_maf <- fread(paste(path,"NeuroX_freq.frq", sep = "\\")) %>% as_tibble() %>% 
+      select(-NCHROBS)
+    NeuroX_p <- fread(paste(path, "NeuroX_fisher_adjust.assoc.fisher", sep = "\\")) %>% as_tibble() %>% 
+      select(CHR, SNP, OR)
+    NeuroX_p_adjust <- fread(paste(path, "NeuroX_fisher_adjust.assoc.fisher.adjusted", sep = "\\")) %>% as_tibble() %>% 
+      select(CHR, SNP, UNADJ, BONF)
+    
+    left_join(x = NeuroX_p, y = NeuroX_p_adjust, by = c("CHR", "SNP")) %>% arrange(BONF) %>% 
+      return()
+    
+  } else if(type == "logit"){
+    NeuroX_maf <- fread(paste(path,"NeuroX_freq.frq", sep = "\\")) %>% as_tibble() %>% 
+      select(-NCHROBS)
+    NeuroX_p <- fread(paste(path, "NeuroX_logit_adjust.assoc.logistic", sep = "\\")) %>% as_tibble() %>% 
+      select(CHR, SNP, OR)
+    NeuroX_p_adjust <- fread(paste(path, "NeuroX_logit_adjust.assoc.logistic.adjusted", sep = "\\")) %>% as_tibble() %>% 
+      select(CHR, SNP, UNADJ, BONF)
+    
+    left_join(x = NeuroX_p, y = NeuroX_p_adjust, by = c("CHR", "SNP")) %>% arrange(BONF) %>% 
+      return() 
+  }
+}
+
+# min max scale ????, 스케일 조정이 아닌 Auto-Encoder ㄱㄱ
+min_max_scale_not_run <- function(x){(x-min(x, na.rm = T))/(max(x, na.rm = T)-min(x, na.rm = T))}
 
 # pre-processing function
 geneset_load <- function(){
@@ -84,7 +123,6 @@ fix_load <- function(data_name){
   # 
   # return(test_fix)
 } # data_name, "IPDGC", "NeuroX"
-
 gene_row_extract <- function(set_name, rare_maf = 0.03, common_maf = 0.05, seed = sample(x = 1:1000, size = 1)){
   
   set.seed(seed) # set seed
@@ -133,6 +171,7 @@ gene_row_extract <- function(set_name, rare_maf = 0.03, common_maf = 0.05, seed 
   
   return(list(rare = rare_result, common = common_result, age_mds_fmiss = age_mds_fmiss_result))
 }
+
 dosage_calc <- function(snp_, state, set_name){
   fwrite(x = tibble(snp_$ID), file = paste0(set_name,"_",state,"_snp_extract.txt"), sep = "\t", col.names = F)
   system(glue("D://tool/plink.exe --file NeuroX/NeuroX_row --extract {name}_{state}_snp_extract.txt --recode A --out {name}_{state}_NeuroX_dosage", 
