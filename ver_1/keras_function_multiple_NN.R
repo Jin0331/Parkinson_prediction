@@ -5,7 +5,7 @@ library_load <- function(){
   library(keras)
   library(SKAT);library(tidyverse);library(data.table);library(abind)
   library(parallel);library(parallelsugar);library(doParallel);library(progress);library(glue)
-  
+  library(DAAG)
   
 }
 data_path <- "C:/Users/JINOO/Desktop/Parkinson_prediction/data/NeuroX_QC/NeuroX_recode"
@@ -41,11 +41,11 @@ load_freq_maf <- function(type){ # fisher, logit
   } else if(type == "logit"){
     NeuroX_maf <- fread(paste(path,"NeuroX_freq.frq", sep = "\\")) %>% as_tibble() %>% 
       select(-NCHROBS)
-    NeuroX_p <- fread(paste(path, "NeuroX_fisher_adjust.logistic.fisher", sep = "\\")) %>% as_tibble() %>% 
-      select(CHR, A1, A2, SNP, OR)
-    NeuroX_p_adjust <- fread(paste(path, "NeuroX_fisher_adjust.assoc.logistic.adjusted", sep = "\\")) %>% as_tibble() %>% 
+    NeuroX_p <- fread(paste(path, "NeuroX_logit_adjust.assoc.logistic", sep = "\\")) %>% as_tibble() %>% 
+      select(CHR, A1, SNP, OR)
+    NeuroX_p_adjust <- fread(paste(path, "NeuroX_logit_adjust.assoc.logistic.adjusted", sep = "\\")) %>% as_tibble() %>% 
       select(CHR, SNP, UNADJ, BONF)
-    left_join(x = NeuroX_maf, y = NeuroX_p, by = c("SNP","CHR","A1","A2")) %>% 
+    left_join(x = NeuroX_maf, y = NeuroX_p, by = c("SNP","CHR","A1")) %>% 
       left_join(x = ., y = NeuroX_p_adjust, by = c("CHR", "SNP")) %>% arrange(BONF) %>% 
       return()
   } 
@@ -58,6 +58,9 @@ varinat_selection <- function(low_maf = 0.03, common_maf = 0.05, seed = sample(x
   
   # set.seed(seed)
   
+  if(!dir.exists("temp")) dir.create("temp")  
+  setwd("temp/")
+   
   cat("dosage calculation!! ")
   # 0730 BONF로 먼저 진행후, unadjust p-value 적용은 나중에 
   # if(test_type != "fisher" | test_type != "logit")
@@ -74,12 +77,13 @@ varinat_selection <- function(low_maf = 0.03, common_maf = 0.05, seed = sample(x
   } else{
     stop("p_value_type error, choosing one that 'BONF', 'UNADJ")
   }
-  cat("----> ")
+  
+  cat("---- ")
   
   control_variant <- variant_dosage[[2]] %>% filter(., PHENOTYPE == 1)
   case_variant <- variant_dosage[[2]] %>% filter(., PHENOTYPE == 2)
   
-  cat("----> ")
+  cat("---- ")
   
   # NA -> 0
   control_variant[is.na(control_variant)] <- 0
@@ -90,10 +94,19 @@ varinat_selection <- function(low_maf = 0.03, common_maf = 0.05, seed = sample(x
   control_sample <- sample.int(n = nrow(control_variant), size = floor(.7 * nrow(control_variant)), replace = F)
   case_sample <- sample.int(n = nrow(case_variant), size = floor(.7 * nrow(case_variant)), replace = F)
   
-  cat("train_test_split!!")
-  varaint_result <- train_test_split(control_df = control_variant, case_df = case_variant, 
-                                  control_sp_num = control_sample, case_sp_num = case_sample)
+  cat("train_test_split!!₩n")
   
+  if(dim_type == "raw"){
+    varaint_result <- train_test_split(control_df = control_variant, case_df = case_variant, 
+                                       control_sp_num = control_sample, case_sp_num = case_sample, dim_c = F)  
+  } else if(dim_type == "dim"){
+    varaint_result <- train_test_split(control_df = control_variant, case_df = case_variant, 
+                                       control_sp_num = control_sample, case_sp_num = case_sample, dim_c = T)  
+  }
+  
+  
+  setwd("../")
+  unlink("temp", recursive = T)
   
   return(varaint_result)
 } # main
@@ -130,7 +143,7 @@ dosage_calc_ver2 <- function(snp_, type){
   
   return(result)
 }
-train_test_split <- function(control_df, case_df, control_sp_num, case_sp_num, dim_c = F){
+train_test_split <- function(control_df, case_df, control_sp_num, case_sp_num, dim_c){
   
   control_train <- control_df[control_sp_num, ] %>% mutate(., PHENOTYPE = 0)
   control_test <- control_df[-control_sp_num, ] %>% mutate(., PHENOTYPE = 0)
@@ -152,8 +165,10 @@ train_test_split <- function(control_df, case_df, control_sp_num, case_sp_num, d
     x_test <- test %>% select(., -PHENOTYPE) %>% mutate_all(as.integer) %>% 
       dim_change()
   } else {
-    x_train <- train %>% select(., -PHENOTYPE) %>% mutate_all(as.numeric) 
-    x_test <- test %>% select(., -PHENOTYPE) %>% mutate_all(as.integer) 
+    x_train <- train %>% select(., -PHENOTYPE) %>% mutate_all(as.numeric) %>%
+      as.matrix()
+    x_test <- test %>% select(., -PHENOTYPE) %>% mutate_all(as.integer) %>% 
+      as.matrix()
   }
   
   y_train <- train %>% select(., PHENOTYPE) %>% mutate_all(as.numeric)
@@ -161,7 +176,7 @@ train_test_split <- function(control_df, case_df, control_sp_num, case_sp_num, d
   
   return(list(x_train = x_train, y_train = as.integer(y_train$PHENOTYPE), 
               x_test = x_test, y_test = as.integer(y_test$PHENOTYPE),
-              dim = x_train))
+              dim = dim(x_train)[-1]))
 }
 dim_change <- function(change_data){
   
